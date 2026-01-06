@@ -21,6 +21,7 @@
 #include "i2c.h"
 #include "usart.h"
 #include "gpio.h"
+#include <string.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -74,6 +75,17 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// Chuyển mảng byte sang chuỗi HEX ASCII
+static void bytes_to_hex(const uint8_t *in, uint8_t len, char *out)
+{
+    const char hex[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < len; i++)
+    {
+        out[i * 2]     = hex[(in[i] >> 4) & 0x0F];
+        out[i * 2 + 1] = hex[in[i] & 0x0F];
+    }
+    out[len * 2] = '\0';
+}
 
 /* USER CODE END 0 */
 
@@ -135,11 +147,42 @@ int main(void)
 	    }
 
 	    // ===== RFID -> PC =====
-	    if (rfid_len > 0 && (HAL_GetTick() - rfid_last_rx_tick) > 3)
+	    // ===== RFID -> EPC -> PC =====
+	    if (rfid_len > 9 && (HAL_GetTick() - rfid_last_rx_tick) > 3)
 	    {
-	        HAL_UART_Transmit(&huart1, rfid_buf, rfid_len, HAL_MAX_DELAY);
+	        /*
+	          Layout theo bạn mô tả:
+	          Byte 0..6  : header (bỏ)
+	          Byte 7..8  : EPC length (00 XX)
+	          Byte 9..   : EPC data
+	        */
+
+	        uint8_t epc_len = rfid_buf[8];  // ví dụ: 0x0C = 12
+
+	        // kiểm tra an toàn
+	        if (epc_len > 0 && (9 + epc_len) <= rfid_len)
+	        {
+	            uint8_t *epc_ptr = &rfid_buf[9];
+
+	            char epc_str[64];  // đủ cho EPC <= 32 byte
+	            bytes_to_hex(epc_ptr, epc_len, epc_str);
+
+	            // Gửi CHỈ EPC về PC (Python)
+	            HAL_UART_Transmit(&huart1,
+	                              (uint8_t *)epc_str,
+	                              strlen(epc_str),
+	                              HAL_MAX_DELAY);
+
+	            HAL_UART_Transmit(&huart1,
+	                              (uint8_t *)"\r\n",
+	                              2,
+	                              HAL_MAX_DELAY);
+	        }
+
+	        // reset buffer raw RFID
 	        rfid_len = 0;
 	    }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
